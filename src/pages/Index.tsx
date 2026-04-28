@@ -77,12 +77,7 @@ const INITIAL_QUESTS: Quest[] = [
   { id: "coins2", title: "Тысячник", description: "Заработать 1000 монет", reward: 300, type: "coins", target: 1000, completed: false },
 ];
 
-const DEMO_PLAYERS: Player[] = [
-  { nick: "CYBER_WOLF", coins: 4200, collection: ["undertale", "minecraft", "fnaf2"], achievements: ["rich", "collector"], clickCount: 340, joinDate: "2024-01-15" },
-  { nick: "NEON_GHOST", coins: 1800, collection: ["geometry-dash", "fnaf-sl"], achievements: ["clicker"], clickCount: 120, joinDate: "2024-02-20" },
-  { nick: "PIXEL_KING", coins: 6500, collection: ["minecraft", "kinitopet", "nulls-brawl", "undertale"], achievements: ["rich", "collector", "questmaster"], clickCount: 560, joinDate: "2023-12-01" },
-  { nick: "DARK_FLUX", coins: 950, collection: ["fnaf2"], achievements: [], clickCount: 45, joinDate: "2024-03-10" },
-];
+// фейковых игроков убрали — теперь только реальные
 
 const PROMOS: Record<string, { type: "coins" | "item"; value: number | string; message: string; achievement?: string }> = {
   "TBS": { type: "item", value: "minecraft-tbs", message: "Получено дополнение «The Broken Script» для Minecraft!", achievement: "here-i-am" },
@@ -107,14 +102,8 @@ function saveUser(u: User) {
 function loadPlayers(): Player[] {
   try {
     const raw = localStorage.getItem(PLAYERS_KEY);
-    const saved: Player[] = raw ? JSON.parse(raw) : [];
-    const nickSet = new Set(saved.map(p => p.nick));
-    const merged = [...saved];
-    for (const d of DEMO_PLAYERS) {
-      if (!nickSet.has(d.nick)) merged.push(d);
-    }
-    return merged;
-  } catch { return DEMO_PLAYERS; }
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
 }
 
 function savePlayers(players: Player[]) {
@@ -142,9 +131,165 @@ function AchievementPopup({ achievement, onDone }: { achievement: Achievement; o
   );
 }
 
+// ───────────────────────── ЗВУКИ ─────────────────────────
+function playSound(type: "click" | "buy" | "achievement" | "error" | "promo") {
+  const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.connect(g);
+  g.connect(ctx.destination);
+
+  const now = ctx.currentTime;
+  if (type === "click") {
+    o.type = "sine"; o.frequency.setValueAtTime(600, now); o.frequency.exponentialRampToValueAtTime(300, now + 0.08);
+    g.gain.setValueAtTime(0.12, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    o.start(now); o.stop(now + 0.08);
+  } else if (type === "buy") {
+    o.type = "triangle";
+    o.frequency.setValueAtTime(400, now); o.frequency.setValueAtTime(600, now + 0.1); o.frequency.setValueAtTime(800, now + 0.2);
+    g.gain.setValueAtTime(0.18, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+    o.start(now); o.stop(now + 0.4);
+  } else if (type === "achievement") {
+    o.type = "sine";
+    o.frequency.setValueAtTime(523, now); o.frequency.setValueAtTime(659, now + 0.12); o.frequency.setValueAtTime(784, now + 0.24);
+    g.gain.setValueAtTime(0.2, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    o.start(now); o.stop(now + 0.5);
+  } else if (type === "promo") {
+    o.type = "square";
+    o.frequency.setValueAtTime(300, now); o.frequency.setValueAtTime(500, now + 0.1); o.frequency.setValueAtTime(700, now + 0.2); o.frequency.setValueAtTime(900, now + 0.3);
+    g.gain.setValueAtTime(0.12, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    o.start(now); o.stop(now + 0.45);
+  } else {
+    o.type = "sawtooth"; o.frequency.setValueAtTime(200, now); o.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+    g.gain.setValueAtTime(0.1, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    o.start(now); o.stop(now + 0.15);
+  }
+}
+
+// ───────────────────────── ФОН СО СМАЙЛИКАМИ ─────────────────────────
+const BG_EMOJIS = ["🎮","💿","🕹️","⚡","💜","🌟","🔮","🎯","👾","🦾","🌀","💫","🔷","🟣","🎲","🏆","🪙","🔑","⚔️","🛸"];
+
+function EmojiBg() {
+  const items = Array.from({ length: 28 }, (_, i) => ({
+    id: i,
+    emoji: BG_EMOJIS[i % BG_EMOJIS.length],
+    left: `${(i * 3.7 + Math.sin(i) * 5 + 100) % 100}%`,
+    size: `${1.1 + (i % 5) * 0.35}rem`,
+    duration: `${12 + (i % 10) * 2.5}s`,
+    delay: `${-(i * 1.4) % 20}s`,
+    opacity: 0.12 + (i % 4) * 0.04,
+  }));
+  return (
+    <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
+      {items.map(it => (
+        <span
+          key={it.id}
+          className="emoji-bg-item"
+          style={{
+            left: it.left,
+            fontSize: it.size,
+            animationDuration: it.duration,
+            animationDelay: it.delay,
+            opacity: it.opacity,
+          }}
+        >
+          {it.emoji}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ───────────────────────── НОВОСТИ ─────────────────────────
+interface NewsItem {
+  id: string;
+  date: string;
+  tag: string;
+  tagColor: string;
+  title: string;
+  body: string;
+  emoji: string;
+}
+
+const NEWS: NewsItem[] = [
+  {
+    id: "n1",
+    date: "28 апреля 2026",
+    tag: "РЕЛИЗ",
+    tagColor: "var(--neon-green)",
+    title: "Геймшоп.com открыт!",
+    body: "Мы рады объявить об официальном запуске геймшоп.com! Теперь ты можешь покупать диски игр за Игровые Монеты, зарабатывать их в кликере, выполнять задания и открывать ачивки. Спасибо, что вы с нами с первого дня!",
+    emoji: "🚀",
+  },
+  {
+    id: "n2",
+    date: "28 апреля 2026",
+    tag: "ПРОМОКОД",
+    tagColor: "var(--neon-pink)",
+    title: "Промокод RELEASE — 850 ИМ в подарок",
+    body: "В честь старта магазина мы выпустили промокод RELEASE. Введи его в разделе Магазин и получи 850 Игровых Монет на свой счёт. Промокод действует для каждого аккаунта один раз.",
+    emoji: "🎁",
+  },
+  {
+    id: "n3",
+    date: "28 апреля 2026",
+    tag: "СЕКРЕТ",
+    tagColor: "var(--neon-purple)",
+    title: "Тайный промокод TBS",
+    body: "Говорят, где-то существует промокод, который открывает секретное дополнение к Minecraft... Его название — три буквы. Введи его в разделе Магазин и узнай, что скрывается за надписью «The Broken Script». Ачивка «Here I Am» ждёт тебя.",
+    emoji: "👁️",
+  },
+  {
+    id: "n4",
+    date: "28 апреля 2026",
+    tag: "ОБНОВЛЕНИЕ",
+    tagColor: "var(--neon-cyan)",
+    title: "Версия 1.0.0 — что уже доступно",
+    body: "В первой версии геймшопа: 7 игровых дисков, система Игровых Монет (ИМ), кликер, 7 заданий с наградами, 5 ачивок, промокоды, коллекция, рейтинг игроков и профиль с сменой ника. Впереди — ещё больше!",
+    emoji: "📋",
+  },
+];
+
+function NewsPage() {
+  return (
+    <div className="animate-fade-in max-w-2xl mx-auto">
+      <p className="font-mono-tech text-xs neon-text-cyan mb-1">// ЛЕНТА</p>
+      <h2 className="font-orbitron text-2xl font-bold text-white mb-6">НОВОСТИ</h2>
+
+      <div className="flex flex-col gap-4">
+        {NEWS.map((n) => (
+          <div key={n.id} className="cyber-card border p-5">
+            <div className="flex items-start gap-4">
+              <span className="text-4xl shrink-0 animate-float">{n.emoji}</span>
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2 flex-wrap">
+                  <span
+                    className="font-orbitron text-xs px-2 py-0.5 rounded-sm border"
+                    style={{ color: n.tagColor, borderColor: n.tagColor, background: `${n.tagColor}15` }}
+                  >
+                    {n.tag}
+                  </span>
+                  <span className="font-mono-tech text-xs text-white/30">{n.date}</span>
+                </div>
+                <h3 className="font-orbitron text-sm font-bold text-white mb-2">{n.title}</h3>
+                <p className="font-rajdhani text-sm text-white/65 leading-relaxed">{n.body}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="cyber-card border p-4 mt-4 text-center">
+        <p className="font-mono-tech text-xs text-white/25">// СЛЕДИ ЗА ОБНОВЛЕНИЯМИ</p>
+      </div>
+    </div>
+  );
+}
+
 // ───────────────────────── НАВИГАЦИЯ ─────────────────────────
 const NAV_ITEMS = [
   { id: "home", label: "Главная", icon: "Home" },
+  { id: "news", label: "Новости", icon: "Newspaper" },
   { id: "shop", label: "Магазин", icon: "ShoppingBag" },
   { id: "clicker", label: "Кликер", icon: "MousePointer2" },
   { id: "quests", label: "Задания", icon: "Target" },
@@ -252,6 +397,7 @@ function ShopPage({ user, setUser, unlockAchievement, showToast }: {
     setUser(updated);
     saveUser(updated);
 
+    playSound("promo");
     showToast(promo.message, "success");
     if (promo.achievement) unlockAchievement(promo.achievement);
 
@@ -273,6 +419,7 @@ function ShopPage({ user, setUser, unlockAchievement, showToast }: {
     const updated = { ...user, coins: user.coins - game.price, collection: newCollection };
     setUser(updated);
     saveUser(updated);
+    playSound("buy");
     showToast(`🎮 ${game.title} добавлен в коллекцию!`, "success");
 
     if (newCollection.filter(id => !id.includes("-tbs")).length >= 3) unlockAchievement("collector");
@@ -373,6 +520,7 @@ function ClickerPage({ user, setUser, unlockAchievement }: {
     const pid = pIdRef.current++;
     setParticles(p => [...p, { id: pid, x, y }]);
     setTimeout(() => setParticles(p => p.filter(pp => pp.id !== pid)), 800);
+    playSound("click");
 
     const newClicks = user.clickCount + 1;
     const newCoins = user.coins + 1;
@@ -932,7 +1080,7 @@ function AboutPage() {
       ))}
 
       <div className="cyber-card border p-5 text-center">
-        <p className="font-mono-tech text-xs text-white/30">версия 1.0.0 · 2024</p>
+        <p className="font-mono-tech text-xs text-white/30">версия 1.0.0 · 2026</p>
         <p className="font-orbitron text-xs text-white/20 mt-1">ГЕЙМШОП.COM — ДИСКИ ИГР И ДРУГОЕ</p>
       </div>
     </div>
@@ -982,6 +1130,7 @@ export default function Index() {
     saveUser(updated);
     setUserState(updated);
     setPendingAchievement(achievement);
+    playSound("achievement");
   }, []);
 
   const toastColors: Record<string, string> = {
@@ -991,6 +1140,7 @@ export default function Index() {
   const renderPage = () => {
     switch (page) {
       case "home": return <HomePage user={user} onNav={setPage} />;
+      case "news": return <NewsPage />;
       case "shop": return <ShopPage user={user} setUser={u => setUser(u)} unlockAchievement={unlockAchievement} showToast={showToast} />;
       case "clicker": return <ClickerPage user={user} setUser={u => setUser(u)} unlockAchievement={unlockAchievement} />;
       case "quests": return <QuestsPage user={user} setUser={u => setUser(u)} timeOnSite={timeOnSite} showToast={showToast} />;
@@ -1004,6 +1154,7 @@ export default function Index() {
 
   return (
     <div className="min-h-screen" style={{ background: "var(--dark-bg)" }}>
+      <EmojiBg />
       {pendingAchievement && (
         <AchievementPopup achievement={pendingAchievement} onDone={() => setPendingAchievement(null)} />
       )}
@@ -1015,7 +1166,7 @@ export default function Index() {
         </div>
       )}
 
-      <nav className="sticky top-0 z-40 border-b scanline" style={{ borderColor: "var(--dark-border)", background: "rgba(7,7,15,0.95)", backdropFilter: "blur(10px)" }}>
+      <nav className="relative z-40 sticky top-0 border-b scanline" style={{ borderColor: "var(--dark-border)", background: "rgba(7,7,15,0.95)", backdropFilter: "blur(10px)" }}>
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center h-14">
             <button onClick={() => setPage("home")} className="font-orbitron text-sm font-black neon-text-purple mr-6 shrink-0">
@@ -1063,12 +1214,12 @@ export default function Index() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="relative z-10 max-w-7xl mx-auto px-4 py-8">
         {renderPage()}
       </main>
 
-      <footer className="border-t mt-16 py-6 text-center" style={{ borderColor: "var(--dark-border)" }}>
-        <p className="font-orbitron text-xs text-white/20">геймшоп.com · ДИСКИ ИГР И ДРУГОЕ · 2024</p>
+      <footer className="relative z-10 border-t mt-16 py-6 text-center" style={{ borderColor: "var(--dark-border)" }}>
+        <p className="font-orbitron text-xs text-white/20">геймшоп.com · ДИСКИ ИГР И ДРУГОЕ · 2026</p>
         <p className="font-mono-tech text-xs text-white/10 mt-1">// ИГРОВЫЕ МОНЕТЫ — ВАЛЮТА САЙТА</p>
       </footer>
     </div>
